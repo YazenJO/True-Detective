@@ -150,6 +150,9 @@ namespace TrueDetective.UI
             _pendingEvidenceAfterNote = null;
             _history.Clear();
 
+            // forget which room the map holds, so the next run rebuilds it from the spawn
+            _builtRoomId = null;
+
             CloseModal();
             if (_hintModal != null) _hintModal.gameObject.SetActive(false);
         }

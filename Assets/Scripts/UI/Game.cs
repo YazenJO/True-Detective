@@ -30,6 +30,7 @@ namespace TrueDetective.UI
         public CaseData Case { get { return Session != null ? Session.Case : null; } }
 
         private RectTransform _root;
+        private Image _rootBg;
         private readonly Dictionary<string, RectTransform> _screens = new Dictionary<string, RectTransform>();
         private readonly List<string> _history = new List<string>();
         private string _current;
@@ -94,9 +95,18 @@ namespace TrueDetective.UI
 
             _root = UIKit.Node("Root", canvasGo.transform);
 
-            var bg = _root.gameObject.AddComponent<Image>();
-            bg.sprite = UIKit.Solid;
-            bg.color = Theme.Ink;
+            // A backstop behind every screen, so a panel that does not fill the frame
+            // still sits on something. It has to be switched off for the walkable
+            // screen: this canvas is Screen Space Overlay, so an opaque image here
+            // paints straight over the world camera and the map never appears.
+            _rootBg = _root.gameObject.AddComponent<Image>();
+            _rootBg.sprite = UIKit.Solid;
+            _rootBg.color = Theme.Ink;
+            _rootBg.raycastTarget = false;
+
+            // Without a listener nothing plays, and Unity only warns once. The camera is
+            // rebuilt per mode, so the listener lives on this object instead.
+            if (FindObjectOfType<AudioListener>() == null) gameObject.AddComponent<AudioListener>();
         }
 
         // ------------------------------------------------------------------
@@ -132,6 +142,12 @@ namespace TrueDetective.UI
 
             foreach (var kv in _screens) kv.Value.gameObject.SetActive(kv.Key == key);
             _current = key;
+
+            // clear the backstop for the walkable screen so its camera shows through
+            bool seeThrough = key == "world";
+            if (_rootBg != null) _rootBg.enabled = !seeThrough;
+            if (_world != null && !seeThrough) _world.SetActive(false);
+
             RefreshScreen(key);
             BringOverlaysToFront();
         }

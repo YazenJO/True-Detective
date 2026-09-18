@@ -25,6 +25,9 @@ namespace TrueDetective.UI
         private TextMeshProUGUI _promptLabel;
         private Button _promptButton;
 
+        /// <summary>The room the world currently holds, so a revisit does not rebuild it.</summary>
+        private string _builtRoomId;
+
         /// <summary>True when this case ships a walkable map for its locations.</summary>
         public bool HasWorld { get { return _world != null && _mapData != null; } }
 
@@ -106,7 +109,27 @@ namespace TrueDetective.UI
                                        UIKit.Ring, UIKit.SoftBlob);
             _stick.transform.SetAsFirstSibling();
 
-            EnterWorldRoom(Session.CurrentLocationId, null);
+            // Coming back from the notebook or an interrogation must not move the player.
+            // The room is only rebuilt when it actually changed; otherwise the spots are
+            // refreshed in place so a clue just collected disappears without a teleport.
+            if (_builtRoomId != Session.CurrentLocationId)
+                EnterWorldRoom(Session.CurrentLocationId, null);
+            else
+            {
+                _world.RefreshRoom();
+                SetWorldTitle();
+            }
+        }
+
+        private void SetWorldTitle()
+        {
+            var bar = _worldBody.Find("topbar");
+            if (bar == null) return;
+            var title = bar.Find("title");
+            if (title == null) return;
+            var t = title.GetComponent<TextMeshProUGUI>();
+            if (t != null && Session.CurrentLocation != null)
+                UIKit.SetText(t, Session.CurrentLocation.name);
         }
 
         /// <summary>Moves the session and the world together, so neither can lead the other.</summary>
@@ -115,18 +138,8 @@ namespace TrueDetective.UI
             if (_world == null) return;
             if (Session.CurrentLocationId != locationId) Session.TravelTo(locationId);
             _world.EnterRoom(locationId, cameFrom);
-
-            var bar = _worldBody.Find("topbar");
-            if (bar != null)
-            {
-                var title = bar.Find("title");
-                if (title != null)
-                {
-                    var t = title.GetComponent<TextMeshProUGUI>();
-                    if (t != null && Session.CurrentLocation != null)
-                        UIKit.SetText(t, Session.CurrentLocation.name);
-                }
-            }
+            _builtRoomId = locationId;
+            SetWorldTitle();
         }
 
         private void OnNearestChanged(WorldSpot spot)

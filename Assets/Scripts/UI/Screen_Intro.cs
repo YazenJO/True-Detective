@@ -57,10 +57,20 @@ namespace TrueDetective.UI
             UIKit.Divider(inner, Theme.PaperEdge, 2f);
             UIKit.Spacer(inner, 10f);
 
-            // a grey block standing in for the photo, with its caption
-            var photo = UIKit.Rect("photo", inner, new Color(0.72f, 0.69f, 0.62f, 1f), false);
+            // the press photo, with a grey plate behind it if the art is ever missing
+            var photoSprite = Art.BrandArt("news_photo");
+            Graphic photo;
+            if (photoSprite != null)
+            {
+                var img = UIKit.Picture("photo", inner, photoSprite, false);
+                photo = img;
+            }
+            else
+            {
+                photo = UIKit.Rect("photo", inner, new Color(0.72f, 0.69f, 0.62f, 1f), false);
+            }
             var ple = photo.gameObject.AddComponent<LayoutElement>();
-            ple.minHeight = 300f; ple.preferredHeight = 300f;
+            ple.minHeight = 420f; ple.preferredHeight = 420f;
 
             var cap = UIKit.Label("cap", inner, n.caption, Theme.SizeTiny,
                                   new Color(0.42f, 0.39f, 0.33f, 1f), TextAlignmentOptions.TopRight, true);
