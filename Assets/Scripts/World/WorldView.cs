@@ -1,5 +1,5 @@
-using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using TrueDetective.Core;
 using TrueDetective.Data;
 using TrueDetective.UI;
@@ -7,39 +7,40 @@ using TrueDetective.UI;
 namespace TrueDetective.World
 {
     /// <summary>
-    /// The walkable mode. Owns the camera, the player body, the current room and the
-    /// nearest-spot prompt, and hands off to the existing screens the moment the player
-    /// acts on something.
+    /// The walkable mode: camera, player body, current room, and tap handling.
     ///
-    /// It deliberately does not own any investigation rules. Whether a clue is available,
-    /// what a question unlocks, whether a confrontation is earned - all of that stays in
-    /// CaseSession, so the map cannot drift out of step with the case.
+    /// Tap a spot and the detective walks over and acts on it. Tap bare floor and he
+    /// walks there. There is no held input anywhere in this file, which is what makes
+    /// it recoverable - any tap at any time replaces whatever came before it.
+    ///
+    /// No investigation rules live here. What is available, what a question opens, when
+    /// a confrontation is earned: all of that stays in CaseSession.
     /// </summary>
     public class WorldView : MonoBehaviour
     {
         /// <summary>Vertical world units the camera shows. Smaller = closer in.</summary>
-        public float ViewHeight = 16f;
+        public float ViewHeight = 15f;
 
-        /// <summary>How hard the camera chases the player. Lower is floatier.</summary>
         public float CameraLag = 7f;
-
-        /// <summary>Player body height in world units.</summary>
         public float PlayerHeight = 2.2f;
+
+        /// <summary>How close to a spot the body stops before acting on it.</summary>
+        public float StandOff = 1.25f;
 
         private Camera _cam;
         private Walker _player;
         private WorldBuilder _builder;
         private MapData _map;
         private CaseSession _session;
+        private Transform _marker;
 
         private WorldSpot _nearest;
+        private WorldSpot _pending;          // walking over to act on this one
         private System.Action<SpotData> _onInteract;
 
         public Walker Player { get { return _player; } }
-        public WorldSpot Nearest { get { return _nearest; } }
         public bool Active { get; private set; }
 
-        /// <summary>Raised whenever the closest spot changes, so the UI can update its prompt.</summary>
         public event System.Action<WorldSpot> NearestChanged;
 
         public void Setup(MapData map, CaseSession session, System.Action<SpotData> onInteract)
@@ -47,8 +48,9 @@ namespace TrueDetective.World
             _map = map;
             _session = session;
             _onInteract = onInteract;
-
             _map.BuildIndex();
+
+            Physics2D.gravity = Vector2.zero;
 
             // ---- camera ----
             var camGo = new GameObject("world camera");
@@ -59,11 +61,7 @@ namespace TrueDetective.World
             _cam.clearFlags = CameraClearFlags.SolidColor;
             _cam.backgroundColor = new Color32(0x08, 0x0A, 0x0C, 0xFF);
             _cam.transform.position = new Vector3(0f, 0f, -10f);
-
-            // Above the scene's Main Camera, which also clears to a solid colour: whichever
-            // camera has the higher depth renders last, so a lower value here would let the
-            // Main Camera paint straight over the world. The UI canvas is Screen Space
-            // Overlay and draws after every camera regardless.
+            // above the scene's Main Camera, which also clears to a solid colour
             _cam.depth = 10f;
 
             // ---- player ----
@@ -74,8 +72,6 @@ namespace TrueDetective.World
             body.bodyType = RigidbodyType2D.Dynamic;
 
             var col = pgo.AddComponent<CapsuleCollider2D>();
-            // a small capsule at the feet: the body should slide past a desk corner the
-            // way a person would, not collide with the whole painted silhouette
             col.size = new Vector2(0.75f, 0.55f);
             col.direction = CapsuleDirection2D.Horizontal;
             col.offset = new Vector2(0f, 0.15f);
@@ -87,54 +83,63 @@ namespace TrueDetective.World
             _player.AttachShadow(UIKit.SoftBlob, PlayerHeight * 0.45f);
             _player.SetHeight(PlayerHeight);
 
+            _player.Arrived += OnArrived;
+            _player.Stalled += OnStalled;
+
+            // ---- destination marker ----
+            var mgo = new GameObject("marker");
+            mgo.transform.SetParent(transform, false);
+            var msr = mgo.AddComponent<SpriteRenderer>();
+            msr.sprite = UIKit.Ring;
+            msr.color = new Color(0.88f, 0.63f, 0.24f, 0.85f);
+            msr.sortingOrder = 30000;
+            mgo.transform.localScale = Vector3.one * 0.9f;
+            _marker = mgo.transform;
+            _marker.gameObject.SetActive(false);
+
             // ---- room ----
             var bgo = new GameObject("builder");
             bgo.transform.SetParent(transform, false);
             _builder = bgo.AddComponent<WorldBuilder>();
-
-            Physics2D.gravity = Vector2.zero;
         }
 
-        /// <summary>Shows or hides the whole walkable mode.</summary>
         public void SetActive(bool on)
         {
             Active = on;
-            gameObject.SetActive(true);
             if (_cam != null) _cam.enabled = on;
             if (_player != null)
             {
                 _player.gameObject.SetActive(on);
-                _player.CanMove = on;
+                if (!on) _player.Halt();
             }
             if (_builder != null) _builder.gameObject.SetActive(on);
+            if (!on && _marker != null) _marker.gameObject.SetActive(false);
         }
 
-        /// <summary>Freezes the body without hiding the world, for when a panel opens over it.</summary>
+        /// <summary>Stops the body and cancels its errand when a panel opens over the world.</summary>
         public void SetInputEnabled(bool on)
         {
-            if (_player != null)
+            if (_player == null) return;
+            _player.CanMove = on;
+            if (!on)
             {
-                _player.CanMove = on;
-                if (!on) _player.SetInput(Vector2.zero);
+                _player.Halt();
+                ClearPending();
             }
         }
 
-        /// <summary>Does this case have a walkable version of that location?</summary>
         public bool HasRoom(string locationId)
         {
             return _map != null && _map.GetRoom(locationId) != null;
         }
 
-        /// <summary>
-        /// Loads a room and places the player. <paramref name="arriveFrom"/> names the
-        /// room they came from; if a spot in the new room travels back there, the player
-        /// appears next to it, which is what makes a doorway feel like a doorway.
-        /// </summary>
         public void EnterRoom(string roomId, string arriveFrom)
         {
             var room = _map.GetRoom(roomId);
             if (room == null) return;
 
+            ClearPending();
+            SetNearest(null);
             _builder.Build(room, IsSpotVisible);
 
             Vector2 at = room.spawn != null ? new Vector2(room.spawn.x, room.spawn.y) : Vector2.zero;
@@ -143,26 +148,33 @@ namespace TrueDetective.World
             {
                 foreach (var s in _builder.Spots)
                 {
-                    if (s.Data == null || s.Data.travelTo != arriveFrom) continue;
-                    // stand just inside the door, not on top of it, or the player
-                    // immediately re-triggers the way back
+                    if (s == null || s.Data == null || s.Data.travelTo != arriveFrom) continue;
+                    // stand just inside the door, or the player instantly walks back out
                     Vector2 door = s.transform.position;
-                    at = door + (Vector2.zero - door).normalized * 1.8f;
+                    Vector2 inward = (Vector2.zero - door);
+                    if (inward.sqrMagnitude < 0.01f) inward = Vector2.up;
+                    at = door + inward.normalized * 2.2f;
                     break;
                 }
             }
 
             _player.Teleport(at);
             SnapCamera();
-
-            _nearest = null;
-            if (NearestChanged != null) NearestChanged(null);
         }
 
-        /// <summary>Rebuilds the current room, picking up anything the session has changed.</summary>
+        /// <summary>
+        /// Rebuilds the room in place, keeping the player where they stand.
+        ///
+        /// Every cached spot reference has to be dropped first: Build destroys the old
+        /// objects, and a pointer left behind would keep a prompt on screen for a thing
+        /// that no longer exists and can no longer be acted on.
+        /// </summary>
         public void RefreshRoom()
         {
             if (_builder == null || _builder.Room == null) return;
+            ClearPending();
+            SetNearest(null);
+
             var keep = _player.transform.position;
             _builder.Build(_builder.Room, IsSpotVisible);
             _player.Teleport(keep);
@@ -173,41 +185,115 @@ namespace TrueDetective.World
             if (s == null) return false;
             if (_session == null) return true;
             if (!_session.RequirementMet(s.requires)) return false;
-            // a clue already in the notebook is gone from the floor
             if (!string.IsNullOrEmpty(s.givesEvidence) && _session.HasEvidence(s.givesEvidence))
                 return false;
             return true;
         }
 
-        public void SetInput(Vector2 dir)
-        {
-            if (_player != null) _player.SetInput(dir);
-        }
-
-        /// <summary>Acts on the nearest spot, if there is one in reach.</summary>
-        public void Interact()
-        {
-            if (_nearest == null || _nearest.Data == null) return;
-            if (_onInteract != null) _onInteract(_nearest.Data);
-        }
+        // ------------------------------------------------------------------
+        // tapping
+        // ------------------------------------------------------------------
 
         private void Update()
         {
-            if (!Active || _player == null) return;
+            if (!Active || _player == null || _cam == null) return;
+
+            if (Input.GetMouseButtonDown(0) && _player.CanMove) HandleTap(Input.mousePosition);
 
             TrackNearest();
             SortByDepth();
-
-            if (Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Space)) Interact();
+            UpdateMarker();
         }
 
-        private void LateUpdate()
+        private void HandleTap(Vector3 screenPoint)
         {
-            if (!Active) return;
-            FollowCamera();
+            // a tap that landed on a button belongs to that button
+            if (EventSystem.current != null && EventSystem.current.IsPointerOverGameObject()) return;
+
+            Vector2 world = _cam.ScreenToWorldPoint(screenPoint);
+
+            // a tap on or near a spot is an order to go and use it
+            WorldSpot hit = null;
+            float bestDist = float.MaxValue;
+            foreach (var s in _builder.Spots)
+            {
+                if (s == null || s.Data == null) continue;
+                float d = Vector2.Distance(world, s.transform.position);
+                // generous: the target is a thing in a room, not a pixel
+                if (d > Mathf.Max(s.Data.radius, 1.4f) || d >= bestDist) continue;
+                hit = s; bestDist = d;
+            }
+
+            if (hit != null)
+            {
+                _pending = hit;
+                Vector2 spot = hit.transform.position;
+                Vector2 from = _player.transform.position;
+                Vector2 away = from - spot;
+                if (away.sqrMagnitude < 0.01f) away = Vector2.down;
+
+                // already close enough: act now instead of shuffling into position
+                if (away.magnitude <= StandOff + 0.35f) { Act(hit); return; }
+
+                _player.WalkTo(spot + away.normalized * StandOff);
+                Sfx.Play(Sfx.Cue.Tap, 0.5f);
+                return;
+            }
+
+            _pending = null;
+            _player.WalkTo(world);
+            Sfx.Play(Sfx.Cue.Tap, 0.35f);
         }
 
-        /// <summary>Finds the closest spot in range and reports a change exactly once.</summary>
+        private void OnArrived()
+        {
+            if (_pending == null) return;
+            var target = _pending;
+            _pending = null;
+            Act(target);
+        }
+
+        /// <summary>
+        /// Blocked on the way. The errand is dropped rather than retried, so the player
+        /// is never left watching the body grind into a shelf.
+        /// </summary>
+        private void OnStalled()
+        {
+            ClearPending();
+        }
+
+        private void Act(WorldSpot spot)
+        {
+            _pending = null;
+            if (spot == null || spot.Data == null) return;
+            if (_onInteract != null) _onInteract(spot.Data);
+        }
+
+        private void ClearPending() { _pending = null; }
+
+        /// <summary>Acts on whatever is in reach, for the on-screen action button.</summary>
+        public void Interact()
+        {
+            if (_nearest != null) Act(_nearest);
+        }
+
+        // ------------------------------------------------------------------
+        // presentation
+        // ------------------------------------------------------------------
+
+        private void UpdateMarker()
+        {
+            if (_marker == null) return;
+            bool show = _player.HasTarget;
+            if (_marker.gameObject.activeSelf != show) _marker.gameObject.SetActive(show);
+            if (!show) return;
+
+            _marker.position = _player.Target;
+            // a gentle pulse so it reads as a live order, not a decal
+            float k = 0.8f + 0.12f * Mathf.Sin(Time.time * 7f);
+            _marker.localScale = new Vector3(k, k * 0.5f, 1f);
+        }
+
         private void TrackNearest()
         {
             Vector2 p = _player.transform.position;
@@ -218,22 +304,25 @@ namespace TrueDetective.World
             {
                 if (s == null || s.Data == null) continue;
                 float d = s.DistanceTo(p);
-                // highlight ramps up over the last stretch of the approach
                 s.SetHighlight(Mathf.InverseLerp(s.Data.radius * 2.2f, s.Data.radius, d));
                 if (d > s.Data.radius || d >= bestDist) continue;
                 best = s; bestDist = d;
             }
 
-            if (best == _nearest) return;
-            _nearest = best;
-            if (NearestChanged != null) NearestChanged(best);
+            SetNearest(best);
         }
 
-        /// <summary>
-        /// Painter's order by Y: whatever is lower on the screen is nearer the camera and
-        /// draws in front. Without this the player walks behind a desk they are standing
-        /// in front of.
-        /// </summary>
+        /// <summary>Reports a change once, and treats a destroyed spot as no spot at all.</summary>
+        private void SetNearest(WorldSpot s)
+        {
+            if (s == null) s = null;                  // collapses a destroyed object to null
+            if (_nearest == null && s == null) return;
+            if (ReferenceEquals(_nearest, s) && s != null) return;
+
+            _nearest = s;
+            if (NearestChanged != null) NearestChanged(s);
+        }
+
         private void SortByDepth()
         {
             SetOrder(_player.transform, _player.transform.position.y);
@@ -246,20 +335,19 @@ namespace TrueDetective.World
             int order = Mathf.RoundToInt(-y * 100f);
             var renderers = t.GetComponentsInChildren<SpriteRenderer>();
             foreach (var r in renderers)
-            {
-                if (r.gameObject.name == "shadow") { r.sortingOrder = order - 1; continue; }
-                r.sortingOrder = order;
-            }
+                r.sortingOrder = r.gameObject.name == "shadow" ? order - 1 : order;
+        }
+
+        private void LateUpdate()
+        {
+            if (!Active) return;
+            FollowCamera();
         }
 
         private void FollowCamera()
         {
             if (_cam == null || _player == null) return;
-
-            Vector3 want = ClampToRoom(_player.transform.position);
-            want.z = -10f;
-
-            // exponential ease, framerate independent
+            Vector3 want = FrameOn(_player.transform.position);
             float k = 1f - Mathf.Exp(-CameraLag * Time.deltaTime);
             _cam.transform.position = Vector3.Lerp(_cam.transform.position, want, k);
         }
@@ -267,18 +355,18 @@ namespace TrueDetective.World
         private void SnapCamera()
         {
             if (_cam == null || _player == null) return;
-            var want = ClampToRoom(_player.transform.position);
-            _cam.transform.position = new Vector3(want.x, want.y, -10f);
+            _cam.transform.position = FrameOn(_player.transform.position);
         }
 
         /// <summary>
-        /// Keeps the view inside the painted room, and centres an axis outright when the
-        /// room is smaller than the view on that axis.
+        /// Where the camera wants to be. It stays inside the painted room, but never at
+        /// the cost of losing the player: if clamping to the room would push them out of
+        /// frame, the player wins and a strip of background shows instead.
         /// </summary>
-        private Vector3 ClampToRoom(Vector3 target)
+        private Vector3 FrameOn(Vector3 target)
         {
             var room = _builder != null ? _builder.Room : null;
-            if (room == null || _cam == null) return target;
+            if (room == null || _cam == null) return new Vector3(target.x, target.y, -10f);
 
             float halfH = _cam.orthographicSize;
             float halfW = halfH * _cam.aspect;
@@ -288,7 +376,14 @@ namespace TrueDetective.World
 
             float x = limitX <= 0f ? 0f : Mathf.Clamp(target.x, -limitX, limitX);
             float y = limitY <= 0f ? 0f : Mathf.Clamp(target.y, -limitY, limitY);
-            return new Vector3(x, y, target.z);
+
+            // keep the body inside a margin of the view no matter what the clamp wanted
+            float marginX = Mathf.Max(halfW - 1.6f, 0.1f);
+            float marginY = Mathf.Max(halfH - 1.8f, 0.1f);
+            x = Mathf.Clamp(x, target.x - marginX, target.x + marginX);
+            y = Mathf.Clamp(y, target.y - marginY, target.y + marginY);
+
+            return new Vector3(x, y, -10f);
         }
     }
 }

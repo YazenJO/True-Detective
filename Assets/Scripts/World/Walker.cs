@@ -3,30 +3,39 @@ using UnityEngine;
 namespace TrueDetective.World
 {
     /// <summary>
-    /// The player's body. Moves on a velocity with acceleration rather than snapping to
-    /// the stick, because instant start and stop reads as a cursor, not a person.
+    /// The player's body. Walks to a destination rather than following a held stick:
+    /// the player taps a point, the body goes there and stops.
     ///
-    /// The whole feel lives in four numbers - Speed, Accel, Drag and the bob - and they
-    /// are the first thing to tune if walking ever feels wrong.
+    /// That choice removes whole classes of bug. There is no held input to lose track
+    /// of, so the body can never be left walking or left frozen by a missed release,
+    /// and a tap that cannot be reached simply stalls out and clears itself.
     ///
-    /// Facing uses three sprites (front, back, side) with the side flipped for left.
-    /// Four painted angles is enough for a top-down camera; the illusion comes from the
-    /// bob and lean, not from frame count.
+    /// The feel lives in Speed, Accel, Drag and the bob; those are the first things to
+    /// change if walking ever reads wrong.
     /// </summary>
     [RequireComponent(typeof(Rigidbody2D))]
     public class Walker : MonoBehaviour
     {
         [Header("feel")]
         public float Speed = 5.2f;
-        public float Accel = 42f;
-        public float Drag = 26f;
+        public float Accel = 40f;
+        public float Drag = 30f;
+
+        [Header("arrival")]
+        [Tooltip("Stop once this close to the destination.")]
+        public float ArriveRadius = 0.28f;
+        [Tooltip("Start easing down this far out, so the stop is not a hard snap.")]
+        public float SlowRadius = 1.5f;
+
+        [Header("stall")]
+        [Tooltip("Give up if blocked and barely moving for this long.")]
+        public float StallTime = 0.35f;
+        [Tooltip("Movement per second below this counts as blocked.")]
+        public float StallSpeed = 0.55f;
 
         [Header("walk cycle")]
-        [Tooltip("Vertical bob height in world units at full speed.")]
         public float BobHeight = 0.075f;
-        [Tooltip("Bob cycles per second at full speed.")]
         public float BobRate = 4.4f;
-        [Tooltip("Degrees the body leans into its direction of travel.")]
         public float LeanDegrees = 4.5f;
 
         public Sprite Front, Back, Side;
@@ -36,19 +45,28 @@ namespace TrueDetective.World
         private Transform _artPivot;
         private Transform _shadow;
         private Vector2 _shadowBase = Vector2.one;
+        private float _artRestY;
 
-        private Vector2 _input;
         private Vector2 _velocity;
         private float _cyclePhase;
 
-        /// <summary>Set false while a dialogue or menu is up.</summary>
+        private bool _hasTarget;
+        private Vector2 _target;
+        private float _stallTimer;
+        private Vector2 _lastPosition;
+
+        /// <summary>Set false while a panel is open over the world.</summary>
         public bool CanMove = true;
 
-        public Vector2 Velocity { get { return _velocity; } }
         public bool IsMoving { get { return _velocity.sqrMagnitude > 0.35f; } }
-
-        /// <summary>Where the character is looking, for line-of-sight work later.</summary>
+        public bool HasTarget { get { return _hasTarget; } }
+        public Vector2 Target { get { return _target; } }
         public Vector2 Facing { get; private set; }
+
+        /// <summary>Raised when the body reaches its destination under its own power.</summary>
+        public event System.Action Arrived;
+        /// <summary>Raised when the body gave up because something was in the way.</summary>
+        public event System.Action Stalled;
 
         private void Awake()
         {
@@ -58,7 +76,6 @@ namespace TrueDetective.World
             _body.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
             _body.interpolation = RigidbodyInterpolation2D.Interpolate;
 
-            // the art hangs off a pivot so the bob and lean never fight the physics body
             var pivotGo = new GameObject("art");
             _artPivot = pivotGo.transform;
             _artPivot.SetParent(transform, false);
@@ -66,12 +83,11 @@ namespace TrueDetective.World
             var artGo = new GameObject("sprite");
             artGo.transform.SetParent(_artPivot, false);
             _art = artGo.AddComponent<SpriteRenderer>();
-            _art.sortingLayerName = "Default";
 
             Facing = Vector2.down;
+            _lastPosition = transform.position;
         }
 
-        /// <summary>A ground shadow, so the body reads as standing on the floor.</summary>
         public void AttachShadow(Sprite blob, float width)
         {
             var go = new GameObject("shadow");
@@ -87,12 +103,11 @@ namespace TrueDetective.World
             if (blob != null && blob.bounds.size.x > 0.0001f)
             {
                 float k = width / blob.bounds.size.x;
-                _shadowBase = new Vector2(k, k * 0.45f);   // squashed: a floor, not a wall
+                _shadowBase = new Vector2(k, k * 0.45f);
                 _shadow.localScale = new Vector3(_shadowBase.x, _shadowBase.y, 1f);
             }
         }
 
-        /// <summary>Scales the body sprite so it stands the requested height in world units.</summary>
         public void SetHeight(float worldHeight)
         {
             if (_art.sprite == null) return;
@@ -100,25 +115,90 @@ namespace TrueDetective.World
             if (h < 0.0001f) return;
             float k = worldHeight / h;
             _artPivot.localScale = new Vector3(k, k, 1f);
-            // feet at the transform origin, body above it
-            _art.transform.localPosition = new Vector3(0f, h * 0.5f, 0f);
+            _artRestY = h * 0.5f;                       // feet at the origin, body above
+            _art.transform.localPosition = new Vector3(0f, _artRestY, 0f);
         }
 
-        /// <summary>Called every frame by whatever is driving this body.</summary>
-        public void SetInput(Vector2 direction)
+        // ------------------------------------------------------------------
+        // orders
+        // ------------------------------------------------------------------
+
+        /// <summary>Walk to a point. Replaces any previous destination.</summary>
+        public void WalkTo(Vector2 worldPoint)
         {
-            _input = direction.sqrMagnitude > 1f ? direction.normalized : direction;
+            _target = worldPoint;
+            _hasTarget = true;
+            _stallTimer = 0f;
+            _lastPosition = transform.position;
         }
+
+        /// <summary>Stop where we are and forget the destination.</summary>
+        public void Halt()
+        {
+            _hasTarget = false;
+            _stallTimer = 0f;
+            _velocity = Vector2.zero;
+            if (_body != null) _body.linearVelocity = Vector2.zero;
+        }
+
+        public void Teleport(Vector2 position)
+        {
+            Halt();
+            _body.position = position;
+            transform.position = position;
+            _lastPosition = position;
+        }
+
+        // ------------------------------------------------------------------
+        // movement
+        // ------------------------------------------------------------------
 
         private void FixedUpdate()
         {
-            Vector2 target = CanMove ? _input * Speed : Vector2.zero;
+            Vector2 want = Vector2.zero;
 
-            // accelerate toward the target, and fall back faster than we speed up so
-            // letting go of the stick stops crisply without the start feeling twitchy
-            float rate = target.sqrMagnitude > 0.01f ? Accel : Drag;
-            _velocity = Vector2.MoveTowards(_velocity, target, rate * Time.fixedDeltaTime);
+            if (_hasTarget && CanMove)
+            {
+                Vector2 here = _body.position;
+                Vector2 toTarget = _target - here;
+                float dist = toTarget.magnitude;
 
+                if (dist <= ArriveRadius)
+                {
+                    _hasTarget = false;
+                    _velocity = Vector2.zero;
+                    _body.linearVelocity = Vector2.zero;
+                    if (Arrived != null) Arrived();
+                }
+                else
+                {
+                    // ease down over the last stretch so arrival is a stop, not a stab
+                    float throttle = Mathf.Clamp01(dist / Mathf.Max(SlowRadius, 0.01f));
+                    throttle = Mathf.Max(throttle, 0.35f);
+                    want = toTarget / dist * Speed * throttle;
+
+                    // if the body is being asked to move but is not actually getting
+                    // anywhere, something solid is in the way: give up rather than
+                    // grinding against it forever
+                    float moved = Vector2.Distance(here, _lastPosition) / Time.fixedDeltaTime;
+                    if (moved < StallSpeed)
+                    {
+                        _stallTimer += Time.fixedDeltaTime;
+                        if (_stallTimer >= StallTime)
+                        {
+                            _hasTarget = false;
+                            _stallTimer = 0f;
+                            if (Stalled != null) Stalled();
+                        }
+                    }
+                    else _stallTimer = 0f;
+                }
+
+                _lastPosition = here;
+            }
+
+            float rate = want.sqrMagnitude > 0.01f ? Accel : Drag;
+            _velocity = Vector2.MoveTowards(_velocity, want, rate * Time.fixedDeltaTime);
             _body.linearVelocity = _velocity;
         }
 
@@ -133,7 +213,6 @@ namespace TrueDetective.World
             }
             else
             {
-                // settle the cycle to a rest pose instead of freezing mid-step
                 _cyclePhase = Mathf.MoveTowards(_cyclePhase % 1f, 0f, Time.deltaTime * 3f);
             }
 
@@ -143,21 +222,19 @@ namespace TrueDetective.World
 
         private void ApplyFacing()
         {
-            // a clear sideways push wins over the vertical one, so walking diagonally
-            // shows the side view rather than flickering between two sprites
             bool sideways = Mathf.Abs(Facing.x) > 0.45f;
+            float scaleX = Mathf.Abs(_artPivot.localScale.x);
 
             if (sideways && Side != null)
             {
                 _art.sprite = Side;
-                var s = _artPivot.localScale;
-                _artPivot.localScale = new Vector3(Mathf.Abs(s.x) * (Facing.x < 0f ? -1f : 1f), s.y, s.z);
+                _artPivot.localScale = new Vector3(scaleX * (Facing.x < 0f ? -1f : 1f),
+                                                   _artPivot.localScale.y, 1f);
             }
             else
             {
                 _art.sprite = Facing.y > 0f && Back != null ? Back : Front;
-                var s = _artPivot.localScale;
-                _artPivot.localScale = new Vector3(Mathf.Abs(s.x), s.y, s.z);
+                _artPivot.localScale = new Vector3(scaleX, _artPivot.localScale.y, 1f);
             }
         }
 
@@ -166,32 +243,18 @@ namespace TrueDetective.World
             // two bobs per stride: the body rises on each footfall
             float bob = Mathf.Abs(Mathf.Sin(_cyclePhase * Mathf.PI * 2f)) * BobHeight * speed01;
 
-            // and squashes very slightly as it lands, which is what sells the weight
-            float squash = 1f - bob * 0.45f;
+            // measured from the stored rest height, never from the current value, or the
+            // offset accumulates and the body drifts up the screen
+            _art.transform.localPosition = new Vector3(0f, _artRestY + bob, 0f);
+            _art.transform.localScale = new Vector3(1f, 1f - bob * 0.45f, 1f);
 
-            var p = _art.transform.localPosition;
-            _art.transform.localPosition = new Vector3(p.x, Mathf.Abs(p.y) + bob, p.z);
-            _art.transform.localScale = new Vector3(1f, squash, 1f);
-
-            float lean = -Facing.x * LeanDegrees * speed01;
-            _artPivot.localRotation = Quaternion.Euler(0f, 0f, lean);
+            _artPivot.localRotation = Quaternion.Euler(0f, 0f, -Facing.x * LeanDegrees * speed01);
 
             if (_shadow != null)
             {
-                // the shadow shrinks as the body lifts. Scaled from the stored base each
-                // frame, never from its current value, or the shrink compounds away.
                 float k = Mathf.Max(1f - bob * 1.6f, 0.72f);
                 _shadow.localScale = new Vector3(_shadowBase.x * k, _shadowBase.y * k, 1f);
             }
-        }
-
-        /// <summary>Drops the body at a point and kills any momentum.</summary>
-        public void Teleport(Vector2 position)
-        {
-            _velocity = Vector2.zero;
-            _body.linearVelocity = Vector2.zero;
-            _body.position = position;
-            transform.position = position;
         }
     }
 }

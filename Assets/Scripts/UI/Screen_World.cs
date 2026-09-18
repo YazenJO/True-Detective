@@ -18,7 +18,6 @@ namespace TrueDetective.UI
     {
         private RectTransform _worldBody;
         private WorldView _world;
-        private TouchStick _stick;
         private MapData _mapData;
 
         private RectTransform _promptRoot;
@@ -104,10 +103,16 @@ namespace TrueDetective.UI
             _promptLabel = _promptButton.GetComponentInChildren<TextMeshProUGUI>();
             _promptRoot.gameObject.SetActive(false);
 
-            // ---- movement stick, beneath the prompt in the hierarchy ----
-            _stick = TouchStick.Create(body, _worldBody.GetComponentInParent<Canvas>(),
-                                       UIKit.Ring, UIKit.SoftBlob);
-            _stick.transform.SetAsFirstSibling();
+            // one line of instruction, the first time the player stands in a room
+            var hint = UIKit.Label("taphint", body, "اضغط على أي مكان للمشي · اضغط على شيء لفحصه",
+                                   Theme.SizeTiny, new Color(1f, 1f, 1f, 0.42f),
+                                   TextAlignmentOptions.Center);
+            hint.rectTransform.anchorMin = new Vector2(0f, 0f);
+            hint.rectTransform.anchorMax = new Vector2(1f, 0f);
+            hint.rectTransform.pivot = new Vector2(0.5f, 0f);
+            hint.rectTransform.sizeDelta = new Vector2(-Theme.Gutter * 2f, 60f);
+            hint.rectTransform.anchoredPosition = new Vector2(0f, 8f);
+            UIKit.NoRaycast(hint);
 
             // Coming back from the notebook or an interrogation must not move the player.
             // The room is only rebuilt when it actually changed; otherwise the spots are
@@ -201,24 +206,23 @@ namespace TrueDetective.UI
             OpenNote(s.label, s.flavourText);
         }
 
-        /// <summary>Stops the body and drops any touch when a panel opens over the world.</summary>
+        /// <summary>Stops the body when a panel opens over the world.</summary>
         private void PauseWorld()
         {
             if (_world != null) _world.SetInputEnabled(false);
-            if (_stick != null) _stick.Release();
         }
 
         private void Update()
         {
             if (_world == null || !_world.Active) return;
 
-            // the world only takes input while its own screen is the one on top
-            bool onTop = _current == "world" && (_docModal == null || !_docModal.gameObject.activeSelf)
-                                             && (_hintModal == null || !_hintModal.gameObject.activeSelf);
+            // the world only takes taps while its own screen is the one on top and
+            // nothing is open over it
+            bool onTop = _current == "world"
+                      && (_docModal == null || !_docModal.gameObject.activeSelf)
+                      && (_hintModal == null || !_hintModal.gameObject.activeSelf);
 
             _world.SetInputEnabled(onTop);
-            if (onTop && _stick != null) _world.SetInput(_stick.Value);
-            else if (_stick != null) _stick.Release();
         }
     }
 }
