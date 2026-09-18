@@ -1,0 +1,189 @@
+{
+  "caseId": "case01",
+
+  "_comment": "World units: every room is 20x20 with the origin at its centre and +Y up the screen. The painted art is 1024x1024, so 1 world unit = 51.2 pixels. Blocker rectangles are traced from the art: to move one, measure it in the PNG, then x = (px/1024 - 0.5) * 20 and y = (0.5 - py/1024) * 20.",
+
+  "rooms": [
+    {
+      "id": "office",
+      "name": "مكتب المحقق",
+      "map": "map_office",
+      "width": 20.0,
+      "height": 20.0,
+      "spawn": { "x": 0.0, "y": -6.6 },
+      "tint": "0.92,0.90,0.88",
+
+      "blockers": [
+        { "x": 0.0,   "y": 9.5,  "w": 20.0, "h": 1.2 },
+        { "x": -6.0,  "y": -9.5, "w": 8.0,  "h": 1.2 },
+        { "x": 6.0,   "y": -9.5, "w": 8.0,  "h": 1.2 },
+        { "x": -9.5,  "y": 0.0,  "w": 1.2,  "h": 20.0 },
+        { "x": 9.5,   "y": 0.0,  "w": 1.2,  "h": 20.0 },
+
+        { "x": 0.2,   "y": 7.9,  "w": 5.4,  "h": 3.0 },
+        { "x": -6.9,  "y": 0.9,  "w": 3.0,  "h": 8.4 },
+        { "x": 2.7,   "y": 1.0,  "w": 4.0,  "h": 7.2 },
+        { "x": 6.2,   "y": 0.6,  "w": 2.2,  "h": 3.4 },
+        { "x": -7.9,  "y": -6.6, "w": 1.8,  "h": 1.8 },
+        { "x": 8.0,   "y": -6.8, "w": 1.6,  "h": 1.6 }
+      ],
+
+      "spots": [
+        {
+          "id": "hs_newspaper",
+          "label": "الجريدة",
+          "at": { "x": 2.7, "y": -3.4 },
+          "radius": 2.0,
+          "hotspotId": "hs_newspaper",
+          "flavourText": "«اختفاء مخطوطة نادرة من دار الأرشيف… دون آثار اقتحام.»\n\nلا آثار اقتحام. إذًا الباب فُتح بمفتاح، أو لم يُفتح أصلًا."
+        },
+        {
+          "id": "hs_briefing",
+          "label": "التكليف",
+          "at": { "x": 6.2, "y": -2.2 },
+          "radius": 1.8,
+          "hotspotId": "hs_briefing",
+          "flavourText": "من مسؤول دار الأرشيف: «المخطوطة أ-47 مفقودة، ولا أثر لاقتحام. أريد أدلة، لا اتهامًا سريعًا.»"
+        },
+        {
+          "id": "hs_board",
+          "label": "خزانة الملفات",
+          "at": { "x": 0.2, "y": 5.4 },
+          "radius": 1.8,
+          "hotspotId": "hs_board",
+          "flavourText": "خزانة قضايا قديمة. كلها مغلقة.\n\nهذه بعد ليست."
+        },
+        {
+          "id": "go_archive",
+          "label": "اخرج إلى دار الأرشيف",
+          "at": { "x": 0.0, "y": -8.6 },
+          "radius": 1.9,
+          "travelTo": "archive_hall"
+        }
+      ]
+    },
+
+    {
+      "id": "archive_hall",
+      "name": "قاعة الأرشيف",
+      "map": "map_archive_hall",
+      "width": 20.0,
+      "height": 20.0,
+      "spawn": { "x": 0.2, "y": -7.6 },
+      "tint": "0.90,0.94,1.00",
+
+      "blockers": [
+        { "x": 0.0,   "y": 9.5,  "w": 20.0, "h": 1.2 },
+        { "x": -5.8,  "y": -9.5, "w": 8.4,  "h": 1.2 },
+        { "x": 5.8,   "y": -9.5, "w": 8.4,  "h": 1.2 },
+        { "x": -9.5,  "y": 0.0,  "w": 1.2,  "h": 20.0 },
+        { "x": 9.5,   "y": 0.0,  "w": 1.2,  "h": 20.0 },
+
+        { "x": -6.6,  "y": 1.4,  "w": 1.6,  "h": 14.4 },
+        { "x": -2.6,  "y": 1.4,  "w": 1.6,  "h": 14.4 },
+        { "x": 3.0,   "y": 1.4,  "w": 1.6,  "h": 14.4 },
+        { "x": 6.8,   "y": 1.4,  "w": 1.6,  "h": 14.4 },
+
+        { "x": 0.0,   "y": 1.0,  "w": 2.6,  "h": 3.0 },
+        { "x": 8.7,   "y": 0.3,  "w": 2.0,  "h": 5.6 }
+      ],
+
+      "spots": [
+        {
+          "id": "hs_pedestal",
+          "label": "موضع المخطوطة",
+          "at": { "x": 0.2, "y": -1.6 },
+          "radius": 2.0,
+          "hotspotId": "hs_pedestal",
+          "flavourText": "الحاملة فارغة. الزجاج سليم، والقفل غير مخلوع. لا شيء هنا كُسر.\n\nمن أخذها فتح المكان كما يفتحه كل يوم."
+        },
+        {
+          "id": "hs_custody_log",
+          "label": "سجل العهدة",
+          "at": { "x": 4.9, "y": 0.3 },
+          "radius": 2.0,
+          "givesEvidence": "E1"
+        },
+        {
+          "id": "hs_samer",
+          "label": "سامر",
+          "at": { "x": -4.6, "y": 2.0 },
+          "radius": 2.2,
+          "sprite": "ch_samer",
+          "spriteHeight": 2.2,
+          "opensCharacter": "samer"
+        },
+        {
+          "id": "go_office",
+          "label": "عُد إلى المكتب",
+          "at": { "x": -5.0, "y": -7.6 },
+          "radius": 1.9,
+          "travelTo": "office"
+        },
+        {
+          "id": "go_guard",
+          "label": "غرفة الحراسة",
+          "at": { "x": 5.4, "y": -7.6 },
+          "radius": 1.9,
+          "travelTo": "guard_room"
+        }
+      ]
+    },
+
+    {
+      "id": "guard_room",
+      "name": "غرفة الحراسة",
+      "map": "map_guard_room",
+      "width": 20.0,
+      "height": 20.0,
+      "spawn": { "x": 0.0, "y": -7.0 },
+      "tint": "0.88,0.96,1.00",
+
+      "blockers": [
+        { "x": 0.0,   "y": 9.5,  "w": 20.0, "h": 1.2 },
+        { "x": -6.0,  "y": -9.5, "w": 8.0,  "h": 1.2 },
+        { "x": 6.0,   "y": -9.5, "w": 8.0,  "h": 1.2 },
+        { "x": -9.5,  "y": 0.0,  "w": 1.2,  "h": 20.0 },
+        { "x": 9.5,   "y": 0.0,  "w": 1.2,  "h": 20.0 },
+
+        { "x": 0.0,   "y": 7.4,  "w": 15.0, "h": 3.4 },
+        { "x": -7.6,  "y": 1.6,  "w": 2.4,  "h": 5.0 },
+        { "x": 7.4,   "y": -2.0, "w": 2.6,  "h": 3.2 }
+      ],
+
+      "spots": [
+        {
+          "id": "hs_monitor",
+          "label": "شاشة تسجيل الممر",
+          "at": { "x": 0.0, "y": 4.2 },
+          "radius": 2.2,
+          "givesEvidence": "E3"
+        },
+        {
+          "id": "hs_nader",
+          "label": "نادر",
+          "at": { "x": -3.6, "y": 0.4 },
+          "radius": 2.2,
+          "sprite": "ch_nader",
+          "spriteHeight": 2.2,
+          "opensCharacter": "nader"
+        },
+        {
+          "id": "hs_duty_book",
+          "label": "دفتر الدوام",
+          "at": { "x": 4.4, "y": 2.6 },
+          "radius": 1.8,
+          "hotspotId": "hs_duty_book",
+          "flavourText": "نادر: دوام من 18:00 إلى 02:00. لم يسجّل أحد غيره بعد السابعة مساءً."
+        },
+        {
+          "id": "go_archive_back",
+          "label": "عُد إلى القاعة",
+          "at": { "x": 0.0, "y": -8.4 },
+          "radius": 1.9,
+          "travelTo": "archive_hall"
+        }
+      ]
+    }
+  ]
+}

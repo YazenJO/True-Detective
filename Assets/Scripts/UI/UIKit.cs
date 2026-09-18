@@ -43,6 +43,66 @@ namespace TrueDetective.UI
         public static Sprite Rounded      { get { if (_rounded == null)      _rounded      = MakeRounded(48, 14); return _rounded; } }
         public static Sprite RoundedSmall { get { if (_roundedSmall == null) _roundedSmall = MakeRounded(32, 8);  return _roundedSmall; } }
 
+        private static Sprite _softBlob;
+        private static Sprite _ring;
+
+        /// <summary>
+        /// A radial fade to transparent. Used for contact shadows under characters and
+        /// for the pool of light a lamp throws - anything that needs a soft edge.
+        /// </summary>
+        public static Sprite SoftBlob
+        {
+            get
+            {
+                if (_softBlob == null)
+                {
+                    const int S = 64;
+                    var t = new Texture2D(S, S, TextureFormat.RGBA32, false);
+                    t.name = "td_blob";
+                    t.wrapMode = TextureWrapMode.Clamp;
+                    float c = (S - 1) * 0.5f;
+                    for (int y = 0; y < S; y++)
+                        for (int x = 0; x < S; x++)
+                        {
+                            float d = Mathf.Sqrt((x - c) * (x - c) + (y - c) * (y - c)) / c;
+                            // squared falloff reads as a soft shadow; linear looks like a disc
+                            float a = Mathf.Clamp01(1f - d);
+                            t.SetPixel(x, y, new Color(1f, 1f, 1f, a * a));
+                        }
+                    t.Apply();
+                    _softBlob = Sprite.Create(t, new Rect(0, 0, S, S), new Vector2(0.5f, 0.5f), 100f);
+                }
+                return _softBlob;
+            }
+        }
+
+        /// <summary>An outlined circle, for the touch stick.</summary>
+        public static Sprite Ring
+        {
+            get
+            {
+                if (_ring == null)
+                {
+                    const int S = 128;
+                    var t = new Texture2D(S, S, TextureFormat.RGBA32, false);
+                    t.name = "td_ring";
+                    t.wrapMode = TextureWrapMode.Clamp;
+                    float c = (S - 1) * 0.5f;
+                    for (int y = 0; y < S; y++)
+                        for (int x = 0; x < S; x++)
+                        {
+                            float d = Mathf.Sqrt((x - c) * (x - c) + (y - c) * (y - c)) / c;
+                            // a band near the rim, anti-aliased on both sides
+                            float a = Mathf.Clamp01(1f - Mathf.Abs(d - 0.88f) / 0.09f);
+                            t.SetPixel(x, y, new Color(1f, 1f, 1f, a));
+                        }
+                    t.Apply();
+                    _ring = Sprite.Create(t, new Rect(0, 0, S, S), new Vector2(0.5f, 0.5f), 100f);
+                }
+                return _ring;
+            }
+        }
+
         /// <summary>
         /// A white rounded-corner square as a 9-sliced sprite, so one texture stretches
         /// to any panel size without distorting its corners.

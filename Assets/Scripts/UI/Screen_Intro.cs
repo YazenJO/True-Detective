@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using TrueDetective.Core;
 
 namespace TrueDetective.UI
 {
@@ -128,8 +129,11 @@ namespace TrueDetective.UI
             UIKit.Spacer(content, 30f);
             UIKit.BtnPrimary("go", content, "اذهب إلى دار الأرشيف", () =>
             {
+                Sfx.Play(Sfx.Cue.Tap);
                 Session.TravelTo("archive_hall");
-                Show("location");
+                // a case with a walkable map goes there; one without falls back to the
+                // painted-scene screen, so a map is an upgrade and never a requirement
+                Show(HasWorld ? "world" : "location", false);
             }, 140f);
             UIKit.Spacer(content, 20f);
         }

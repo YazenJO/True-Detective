@@ -136,10 +136,13 @@ namespace TrueDetective.UI
             BringOverlaysToFront();
         }
 
-        /// <summary>Goes back one screen, falling back to the current location.</summary>
+        /// <summary>The screen the investigation lives on: the map, or the painted scene.</summary>
+        public string InvestigationScreen { get { return HasWorld ? "world" : "location"; } }
+
+        /// <summary>Goes back one screen, falling back to wherever the player was standing.</summary>
         public void Back()
         {
-            if (_history.Count == 0) { Show("location", false); return; }
+            if (_history.Count == 0) { Show(InvestigationScreen, false); return; }
             string prev = _history[_history.Count - 1];
             _history.RemoveAt(_history.Count - 1);
             Show(prev, false);
@@ -150,6 +153,7 @@ namespace TrueDetective.UI
             switch (key)
             {
                 case "intro":        RefreshCinematic();    break;
+                case "world":        RefreshWorld();        break;
                 case "menu":         RefreshMenu();         break;
                 case "cases":        RefreshCases();        break;
                 case "settings":     RefreshSettings();     break;
@@ -169,6 +173,7 @@ namespace TrueDetective.UI
         private void BuildAllScreens()
         {
             BuildCinematic();
+            BuildWorld();
             BuildMenu();
             BuildCases();
             BuildSettings();

@@ -143,7 +143,7 @@ namespace TrueDetective.UI
 
             if (!string.IsNullOrEmpty(h.travelTo))
             {
-                if (Session.TravelTo(h.travelTo)) Show("location", false);
+                if (Session.TravelTo(h.travelTo)) Show(InvestigationScreen, false);
                 return;
             }
 

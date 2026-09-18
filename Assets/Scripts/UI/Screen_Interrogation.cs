@@ -29,7 +29,7 @@ namespace TrueDetective.UI
         {
             Clear(_intBody);
             var c = Case.GetCharacter(_interrogateCharacterId);
-            if (c == null) { Show("location", false); return; }
+            if (c == null) { Show(InvestigationScreen, false); return; }
 
             TopBar(_intBody, c.name + " — " + c.role, Back);
             BottomBar(_intBody);

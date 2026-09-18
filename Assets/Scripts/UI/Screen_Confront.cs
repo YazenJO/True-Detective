@@ -29,7 +29,7 @@ namespace TrueDetective.UI
             var cf = _activeConfrontation;
             if (cf == null || cf.dialogue == null || cf.dialogue.Length == 0)
             {
-                Show("location", false);
+                Show(InvestigationScreen, false);
                 return;
             }
 
@@ -105,7 +105,7 @@ namespace TrueDetective.UI
                     _activeConfrontation = null;
                     _cfLine = 0;
                     OpenNote("ما تغيّر", cf.outcomeNote);
-                    Show("location", false);
+                    Show(InvestigationScreen, false);
                 }, 120f, Theme.SizeBody);
             }
         }
