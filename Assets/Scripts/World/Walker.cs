@@ -52,6 +52,7 @@ namespace TrueDetective.World
 
         private bool _hasTarget;
         private Vector2 _target;
+        private Vector2 _steer;
         private float _stallTimer;
         private Vector2 _lastPosition;
 
@@ -132,6 +133,16 @@ namespace TrueDetective.World
             _lastPosition = transform.position;
         }
 
+        /// <summary>
+        /// Direct steering, for a keyboard. Any held direction takes over from the
+        /// current destination, so the two control schemes cannot fight each other.
+        /// </summary>
+        public void Steer(Vector2 direction)
+        {
+            _steer = direction.sqrMagnitude > 1f ? direction.normalized : direction;
+            if (_steer.sqrMagnitude > 0.01f && _hasTarget) _hasTarget = false;
+        }
+
         /// <summary>Stop where we are and forget the destination.</summary>
         public void Halt()
         {
@@ -157,7 +168,13 @@ namespace TrueDetective.World
         {
             Vector2 want = Vector2.zero;
 
-            if (_hasTarget && CanMove)
+            if (CanMove && _steer.sqrMagnitude > 0.01f)
+            {
+                want = _steer * Speed;
+                _stallTimer = 0f;
+                _lastPosition = _body.position;
+            }
+            else if (_hasTarget && CanMove)
             {
                 Vector2 here = _body.position;
                 Vector2 toTarget = _target - here;

@@ -18,14 +18,19 @@ namespace TrueDetective.World
     /// </summary>
     public class WorldView : MonoBehaviour
     {
-        /// <summary>Vertical world units the camera shows. Smaller = closer in.</summary>
-        public float ViewHeight = 15f;
+        /// <summary>
+        /// Extra world units of room shown beyond its own height. 0 frames the room's
+        /// full height exactly, which on a portrait screen still leaves the width
+        /// scrolling - a square room cannot fill a 9:16 frame without either cropping
+        /// the sides or stranding the player in a sea of background.
+        /// </summary>
+        public float ViewPadding = 1.0f;
 
-        public float CameraLag = 7f;
-        public float PlayerHeight = 2.2f;
+        public float CameraLag = 8f;
+        public float PlayerHeight = 2.9f;
 
         /// <summary>How close to a spot the body stops before acting on it.</summary>
-        public float StandOff = 1.25f;
+        public float StandOff = 1.35f;
 
         private Camera _cam;
         private Walker _player;
@@ -57,7 +62,7 @@ namespace TrueDetective.World
             camGo.transform.SetParent(transform, false);
             _cam = camGo.AddComponent<Camera>();
             _cam.orthographic = true;
-            _cam.orthographicSize = ViewHeight * 0.5f;
+            _cam.orthographicSize = 10f;            // replaced per room by FitToRoom
             _cam.clearFlags = CameraClearFlags.SolidColor;
             _cam.backgroundColor = new Color32(0x08, 0x0A, 0x0C, 0xFF);
             _cam.transform.position = new Vector3(0f, 0f, -10f);
@@ -158,8 +163,20 @@ namespace TrueDetective.World
                 }
             }
 
+            FitToRoom(room);
             _player.Teleport(at);
             SnapCamera();
+        }
+
+        /// <summary>
+        /// Frames the room's full height. Anything tighter and the player cannot see
+        /// where the doors and the people are, which is what made the rooms confusing
+        /// to move around rather than merely small.
+        /// </summary>
+        private void FitToRoom(RoomData room)
+        {
+            if (_cam == null || room == null) return;
+            _cam.orthographicSize = (room.height + ViewPadding) * 0.5f;
         }
 
         /// <summary>
@@ -200,6 +217,17 @@ namespace TrueDetective.World
 
             if (Input.GetMouseButtonDown(0) && _player.CanMove) HandleTap(Input.mousePosition);
 
+            // keyboard steering, so the game is testable on a desktop without tapping
+            float kx = 0f, ky = 0f;
+            if (Input.GetKey(KeyCode.A) || Input.GetKey(KeyCode.LeftArrow))  kx -= 1f;
+            if (Input.GetKey(KeyCode.D) || Input.GetKey(KeyCode.RightArrow)) kx += 1f;
+            if (Input.GetKey(KeyCode.W) || Input.GetKey(KeyCode.UpArrow))    ky += 1f;
+            if (Input.GetKey(KeyCode.S) || Input.GetKey(KeyCode.DownArrow))  ky -= 1f;
+            _player.Steer(new Vector2(kx, ky));
+            if (kx != 0f || ky != 0f) ClearPending();
+
+            if (Input.GetKeyDown(KeyCode.E) || Input.GetKeyDown(KeyCode.Space)) Interact();
+
             TrackNearest();
             SortByDepth();
             UpdateMarker();
@@ -226,24 +254,77 @@ namespace TrueDetective.World
 
             if (hit != null)
             {
-                _pending = hit;
                 Vector2 spot = hit.transform.position;
                 Vector2 from = _player.transform.position;
-                Vector2 away = from - spot;
-                if (away.sqrMagnitude < 0.01f) away = Vector2.down;
 
                 // already close enough: act now instead of shuffling into position
-                if (away.magnitude <= StandOff + 0.35f) { Act(hit); return; }
+                if (Vector2.Distance(from, spot) <= StandOff + 0.5f) { Act(hit); return; }
 
-                _player.WalkTo(spot + away.normalized * StandOff);
+                _pending = hit;
+                _player.WalkTo(ApproachPoint(spot, from));
                 Sfx.Play(Sfx.Cue.Tap, 0.5f);
                 return;
             }
 
             _pending = null;
-            _player.WalkTo(world);
+            _player.WalkTo(NearestFreePoint(world));
             Sfx.Play(Sfx.Cue.Tap, 0.35f);
         }
+
+        /// <summary>
+        /// Somewhere clear to stand next to a spot. The straight-line approach is tried
+        /// first, then angles either side of it, because in a narrow aisle the point
+        /// directly between the player and a shelf is usually inside that shelf.
+        /// </summary>
+        private Vector2 ApproachPoint(Vector2 spot, Vector2 from)
+        {
+            Vector2 away = from - spot;
+            if (away.sqrMagnitude < 0.01f) away = Vector2.down;
+            away.Normalize();
+
+            float[] turns = { 0f, 35f, -35f, 70f, -70f, 110f, -110f, 150f, -150f, 180f };
+            foreach (float deg in turns)
+            {
+                Vector2 dir = Quaternion.Euler(0f, 0f, deg) * away;
+                Vector2 candidate = spot + dir * StandOff;
+                if (IsClear(candidate)) return candidate;
+            }
+            return spot + away * StandOff;   // nothing clear: let the stall detector handle it
+        }
+
+        /// <summary>The tapped point, nudged out of scenery if it landed inside some.</summary>
+        private Vector2 NearestFreePoint(Vector2 wanted)
+        {
+            if (IsClear(wanted)) return wanted;
+
+            for (float r = 0.6f; r <= 2.4f; r += 0.6f)
+                for (int i = 0; i < 8; i++)
+                {
+                    float a = i * Mathf.PI * 0.25f;
+                    Vector2 c = wanted + new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * r;
+                    if (IsClear(c)) return c;
+                }
+            return wanted;
+        }
+
+        /// <summary>
+        /// Is there room for the body to stand here? The player's own collider is
+        /// skipped, or every point near the detective would read as blocked by him.
+        /// </summary>
+        private bool IsClear(Vector2 point)
+        {
+            int n = Physics2D.OverlapCircleNonAlloc(point, 0.42f, _overlapBuffer);
+            for (int i = 0; i < n; i++)
+            {
+                var c = _overlapBuffer[i];
+                if (c == null) continue;
+                if (_player != null && c.transform.IsChildOf(_player.transform)) continue;
+                return false;
+            }
+            return true;
+        }
+
+        private readonly Collider2D[] _overlapBuffer = new Collider2D[8];
 
         private void OnArrived()
         {

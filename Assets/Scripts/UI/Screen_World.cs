@@ -35,9 +35,15 @@ namespace TrueDetective.UI
             var s = NewScreen("world", new Color(0f, 0f, 0f, 0f));
             _worldBody = UIKit.Node("body", s);
 
-            // the panel background must not paint over the world camera
+            // The panel must not paint over the world camera, and must not swallow taps.
+            // A fully transparent Image still counts as a raycast target, so leaving this
+            // on makes every tap register as "on the UI" and the world never sees one.
             var panelImg = s.GetComponent<Image>();
-            if (panelImg != null) panelImg.color = new Color(0f, 0f, 0f, 0f);
+            if (panelImg != null)
+            {
+                panelImg.color = new Color(0f, 0f, 0f, 0f);
+                panelImg.raycastTarget = false;
+            }
 
             _mapData = LoadMap(caseId);
             if (_mapData == null) return;
